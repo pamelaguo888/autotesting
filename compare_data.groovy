@@ -10,8 +10,7 @@ def parsed_response(String jdbcName) {
 		def groovyUtils = new com.eviware.soapui.support.GroovyUtils(context)
         def DBholder = groovyUtils.getXmlHolder(jdbcName + "#ResponseAsXml")
 
-        def DataList = [:]
-        def i = 0;
+        def DataList = []
         for( node in DBholder.getDomNodes( "//Row" )){
             //log.info "Item : [$node]"
             def itemMap = [:]
@@ -26,7 +25,7 @@ def parsed_response(String jdbcName) {
                 }
                       
             }
-            DataList.put(i++, itemMap)         
+            DataList.add(itemMap)         
         }
 
         return DataList
@@ -38,75 +37,76 @@ def parsed_response(String jdbcName) {
 	}
 }
 
-def remove_item_from_list(Map item, List list) {
-	for (int i=0; i<list.size(); i++) {
-		if (item.equals(list[i])) {
-			list.remove(i)
-			break
-		}
-	}
+
+def findTargetItems(List sourceItems, String identifierName, String identifierValue) {  
+    //log.info "$identifierName : $identifierValue"
+    //def size = sourceItems.size()
+    //log.info "source items size = $size"
+    if(sourceItems.size() > 1){
+        //sourceItems = sourceItems.findAll{it["ACCT_CD"]== "CRDOPTY"}
+        sourceItems = sourceItems.findAll { it[identifierName] == identifierValue } 
+    }
+
+    return sourceItems
 }
+
 
 try {
 		
 	log.info "$testRunner.testCase.name verification start..."
-	dbXmlSource = parsed_response("Source DB Fetch")
-	dbXmlTarget = parsed_response("Target DB Fetch")
+	List dbXmlSource = parsed_response("Source DB Fetch")
+    List dbXmlTarget = parsed_response("Target DB Fetch")
 
-	items_in_base_but_not_target = [:]
+	List items_in_base_but_not_target = []
 
     log.info "dbXmlSource size = " + dbXmlSource.size()
 	log.info "dbXmlTarget size = " + dbXmlTarget.size()
     def base_record_size = dbXmlSource.size()
 	def target_record_size = dbXmlTarget.size()
 
-    def j = 0
+    String[] identifiers = testRunner.testCase.getPropertyValue("Identifier").split(',')
+    log.info "Using Identifiers : $identifiers"
 	for (item in dbXmlSource) {
         //item.each{entry -> log.info "Source - $entry.key : $entry.value" }
-        // Get a test case property
-        def identifier = testRunner.testCase.getPropertyValue("Identifier")
-        def targetItem = dbXmlTarget.find { it.value[identifier] == item.value[identifier] } // find a single entry
-        //targetItem.each{entry -> log.info "Target - $entry.key : $entry.value" }
-
-        if(!item.equals(targetItem)){
-            //log.info "Key:$item.key, Value:$item.value"
-            items_in_base_but_not_target.put(j++, item.value)
+        def targetItems = dbXmlTarget.clone()
+        for (String identifier in identifiers){
+                
+            targetItems = findTargetItems(targetItems, identifier, item[identifier])
+            //def size = targetItems.size()
+            //log.info "Found $size target item(s) for $identifier"
         }
-		//else {
-			//remove_item_from_list(item, dbXmlSource)
-		//}
+        //log.info targetItems
+        if(!item.equals(targetItems.find{true})){  
+                items_in_base_but_not_target.add(item)
+        }
+		
 	}
 
 
 	log.info "items_in_base_but_not_target size = " + items_in_base_but_not_target.size()
 
-	log.info "write results into file......"
-
 	def groovyUtils = new com.eviware.soapui.support.GroovyUtils(context)
 	def projectPath = groovyUtils.projectPath
-	
-    //log.info testRunner.testCase.testSuite.project.name
-    //log.info testRunner.testCase.name
-    def fileName = testRunner.testCase.name
-	File outputFile = new File(projectPath + context.expand('\\${#Project#OUTPUT_FOLDER}\\') + fileName + ".csv")
-	
-
-    for(item in items_in_base_but_not_target) {
-        //log.info "Key:$item.key, Value:$item.value"
-        if(item.key == 0){
-            def header = ""
-            for(data in item.value){
-                header += data.key + ","
+	if(items_in_base_but_not_target.size() > 0){
+        def fileName = testRunner.testCase.name
+	    File outputFile = new File(projectPath + context.expand('\\${#Project#OUTPUT_FOLDER}\\') + fileName + ".csv")
+    
+        log.info "write results into file: $outputFile "
+        items_in_base_but_not_target.eachWithIndex { item, index ->
+            //item.each{entry -> log.info "Key:$entry.key, Value:$entry.value" }
+            // Add File Header Row
+            if(index == 0){
+                 def header = ""
+                 item.each{entry -> header += entry.key + ","}
+                 log.info "Header: $header"
+                 outputFile.text = header + "\n"
             }
-            outputFile.text = header + "\n"
-        }
-        def datavalue = ""       
-        for(data in item.value){
-            //log.info "Data -  $data.key, $data.value"
-            datavalue += data.value + ","
-        }
-		outputFile.append(datavalue + "\n")
-	}
+            def dataValue = ""       
+            item.each{entry -> dataValue += entry.value + ","}
+	    	outputFile.append(dataValue + "\n")
+	    }
+    }
+    
 	
     File summary_file = new File(projectPath + context.expand('\\${#Project#OUTPUT_FOLDER}') + "\\SUMMARY_Main.csv")
 	def summary_line = "$testRunner.testCase.name" + "," + base_record_size + "," + target_record_size + "," + items_in_base_but_not_target.size()
